@@ -2,68 +2,16 @@
 
 test_folder=$1
 target_folder="$(pwd)/test-reports"
-[[ ! -d "$target_folder" ]] && mkdir -p "$target_folder"
+[[ -d "$target_folder" ]] && rm -rf "$target_folder"
+mkdir -p "$target_folder"
 test_logfile="$target_folder/test.log"
 echo "" >> "$test_logfile"
-
-####################
-#### Statistics ####
-####################
-
-function save_result() {
-  echo "entering save_result"
-  echo "$1" # todo pretty print this
-  echo "$1" >> "$test_logfile"
-}
-
-function print_results() {
-  echo "entering print_results"
-  while read line; do
-    echo "$line"
-  done < "$test_logfile"
-}
-
-######################
-#### Test Running ####
-######################
-
-function check_file() {
-  echo "entering check_file"
-  # todo sanitycheck the file
-  local test_file=$1
-  . "$test_file"
-
-  # Run setup function if defined
-  grep -q '^function setup()' "$test_file" && setup¬
-
-  sed -n 's/^function \(check_.*\)().*/\1/p' "$test_file" | while IFS= read -r test_name; do
-    start_time=$SECONDS
-    message=$($test_name)
-    status=$?
-    time_spent=$(( SECONDS - start_time ))
-    save_result "$test_file | $test_name | $status | $message | $time_spent"
-  done
-
-  # Run cleanup if define
-  grep -q '^function cleanup()' "$test_file" && cleanup
-}
-
-function run_tests() {
-  echo "entering run_tests"
-  # generate a summary
-  # create a rapport
-  while IFS= read -r -d '' file; do
-    (check_file "$file")
-  done < <(find "$test_folder" -type f \( -name '*.bash' -or -name '*.sh' \) -print0)
-
-  print_results
-}
 
 #################
 #### Asserts ####
 #################
 
-function assert_equal() { # assert that $1 is equal to $2
+function assert_equals() { # assert that $1 is equal to $2
   if [[ "$1" -eq "$2" ]]; then
     echo "Success"
     return 0
@@ -73,7 +21,7 @@ function assert_equal() { # assert that $1 is equal to $2
   fi
 }
 
-function assert_not_empty() { # assert that $1 is not empty or only spaces
+function assert_none_empty() { # assert that $1 is not empty or only spaces
   if [[ -z "${1// }" ]]; then
     echo "Success"
     return 0
@@ -91,6 +39,55 @@ function assert_is_substring_of() { # assert that $1 is a substring of $2
   else
    echo "'$1' was not a substring of '$2'"
  fi
+}
+
+####################
+#### Statistics ####
+####################
+
+function save_result() {
+  echo "$1" # todo pretty print this
+  echo "$1" >> "$test_logfile"
+}
+
+function print_results() {
+  while read line; do
+    echo "$line"
+  done < "$test_logfile"
+}
+
+######################
+#### Test Running ####
+######################
+
+function check_file() {
+  # todo sanitycheck the file
+  local test_file=$1
+  . "$test_file"
+
+  # Run setup function if defined
+  grep -q '^function setup()' "$test_file" && setup
+
+  sed -n 's/^function \(check_.*\)().*/\1/p' "$test_file" | while IFS= read -r test_name; do
+    start_time=$SECONDS
+    message=$($test_name)
+    status=$?
+    time_spent=$(( SECONDS - start_time ))
+    save_result "$test_file | $test_name | $status | $message | $time_spent"
+  done
+
+  # Run cleanup if define
+  grep -q '^function cleanup()' "$test_file" && cleanup
+}
+
+function run_tests() {
+  # generate a summary
+  # create a rapport
+  while IFS= read -r -d '' file; do
+    (check_file "$file")
+  done < <(find "$test_folder" -type f \( -name '*.bash' -or -name '*.sh' \) -print0)
+
+  print_results
 }
 
 #######################
