@@ -1,5 +1,4 @@
 #! /usr/bin/env bash
-
 test_folder=$1
 target_folder="$(pwd)/test-reports"
 [[ -d "$target_folder" ]] && rm -rf "$target_folder"
@@ -13,10 +12,12 @@ echo "" >> "$test_logfile"
 
 OPEN='open'
 CLOSE='close'
-BEGIN='start'
+BEGIN='begin'
 END='end'
 ASSERT='assert'
 ERROR='error'
+TEST='test'
+FILE='file'
 SUMMARY='summary'
 
 function log_event() {
@@ -30,12 +31,82 @@ function print_results() {
 }
 
 function start_printer() {
-  tail -f "$test_logfile"
+local green=$(echo -e '\e[32m')
+local red=$(echo -e '\e[31m')
+local reset=$(echo -e '\e[39m')
+tail -f "$test_logfile" | sed \
+  -e "s/^$OPEN|\(.*\)|.*/\1/" \
+  -e "s/^$BEGIN|\(.*\)|.*/ \1/" \
+  -e "s/^$TEST|.*|0|0|.*|.*/  $green[Ok]$reset/" \
+  -e "s/^$ASSERT|f|\(.*\)|.*/  $red[Failed] \1$reset/" \
+  -e "s/^$ERROR|\(.*\)|.*|.*/  $red[Error] \1$reset/" \
+  -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/ [sum] success: \1 failures: \2 errors: \3 time: \4/" \
+  -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] success: \1 failures: \2 errors: \3 time: \4/" \
+  -e "/^$ASSERT|s|/d" \
+  -e "/^$TEST|.*/d" \
+  -e "/^$END/d" \
+  -e "/^$CLOSE/d"
 }
 
 function stop_printer() {
   # todo make this not static
   kill %1
+}
+
+function create_test_xml() {
+
+  sed -e "s/^$OPEN|\(.*\)|.*/\1/" \
+    -e "s/^$START|\(.*\)|.*/<testcase classname=\"$file_name\" name=\"\1\" time=\"0\">/" \
+    -e "s/^$ASSERT|s|\(.*\)|.*//" \ # NOOP
+    -e "s/^$ASSERT|f|\(.*\)|.*/<failure message=\"Assertion failed\" type=\"failure\">\1<\/failure>/" \
+    -e "s/^$ERROR|\(.*\)|.*|.*/<failure message=\"Error\" type=\"error\">\1<\/failure>/" \
+    -e "s/^$END/<\/testcase>/" \
+    -e "s/^$CLOSE/<\/testsuite>/"
+
+
+}
+
+function create_test_suites() {
+  local erros=$(grep -c "^$ERROR|" "$test_logfile")
+  local fails=$(grep -c "^$ASSERT|f|" "$test_logfile")
+  for suite in $(sed -n "s/^$OPEN|\(.*\)|.*/\1/p" "$test_logfile"); do
+    escaped=${suite//\//\\/}
+    awk '/^'"$OPEN"'\|'"$escaped"'\|/,/^'"$CLOSE"'\|'"$escaped"'/' "$test_logfile"
+  done
+}
+
+function summarize_test() {
+  test_name=$1
+  test_data=$(awk '/^'"$BEGIN"'\|'"$test_name"'\|/,/^'"$END"'\|'"$test_name"'/' "$test_logfile")
+  asserts=$(grep -c "^$ASSERT|s|" <(echo "$test_data"))
+  failures=$(grep -c "^$ASSERT|f|" <(echo "$test_data"))
+  errors=$(grep -c "^$ERROR" <(echo "$test_data"))
+  seconds=$(cut -d '|' -f 3  <(echo "$test_data") | sed -e 1b -e '$!d' | sort -nr | paste -sd- - | bc)
+
+  log_event "$TEST" "${asserts}|${failures}|${errors}|${seconds}"
+}
+
+function summarize_file() {
+  file_name=${1//\//\\/}
+  file_data=$(awk '/^'"$OPEN"'\|'"$file_name"'\|/,/^'"$CLOSE"'\|'"$file_name"'/' "$test_logfile" | grep "^$TEST")
+  # todo apply some more awk foo here
+  asserts=$(awk -F '|' '{sum+=$2} END {print sum}' <(echo "$file_data"))
+  failures=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$file_data"))
+  errors=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$file_data"))
+  seconds=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$file_data"))
+
+  log_event "$FILE" "${asserts}|${failures}|${errors}|${seconds}"
+}
+
+function summarize() {
+  # todo apply some more awk foo here
+  sum_data=$(grep "^$FILE" "$test_logfile")
+  asserts=$(awk -F '|' '{sum+=$2} END {print sum}' <(echo "$sum_data"))
+  failures=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$sum_data"))
+  errors=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$sum_data"))
+  seconds=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$sum_data"))
+
+  log_event "$SUMMARY" "${asserts}|${failures}|${errors}|${seconds}"
 }
 
 #################
@@ -94,12 +165,14 @@ function check_file() {
     log_event "$BEGIN" "$test_name"
     execute_function "$test_name"
     log_event "$END" "$test_name"
+    summarize_test "$test_name"
   done
 
   # Run cleanup if defined
   grep -q '^function cleanup()' "$test_file" && execute_function "cleanup"
 
   log_event "$CLOSE" "$test_file"
+  summarize_file "$test_file"
 }
 
 function run_tests() {
@@ -109,6 +182,7 @@ function run_tests() {
   while IFS= read -r -d '' file; do
     (check_file "$file")
   done < <(find "$test_folder" -type f \( -name '*.bash' -or -name '*.sh' \) -print0)
+  summarize
   stop_printer
 }
 
