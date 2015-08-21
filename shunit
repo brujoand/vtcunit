@@ -17,7 +17,7 @@ function assert_equals() { # assert that $1 is equal to $2
     return 0
   else
     echo "Expected $1 but got $2"
-    echo 1
+    return 1
   fi
 }
 
