@@ -32,17 +32,17 @@ function present_to_user() {
   local red=$(echo -e '\e[31m')
   local reset=$(echo -e '\e[39m')
   echo "${1}" | sed \
-    -e "s/^$OPEN|\(.*\)|.*/\1:/" \
     -e "s/^$TEST|\(.*\)|s|.*/    \1 $green[Ok] $reset/" \
     -e "s/^$TEST|\(.*\)|f|.*/    \1 $red[Failure] $reset/" \
     -e "s/^$TEST|\(.*\)|e|.*/    \1 $red[Error] $reset/" \
-    -e "s/^$ASSERT|f|\(.*\)|.*/$red      \1 $reset/" \
+    -e "s/^$ASSERT|f|\(.*\)|\(.*\)|.*/      line: \2$red \1 $reset/" \
     -e "s/^$ERROR|\(.*\)|.*|.*/$red      \1 $reset/" \
     -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/ [\1] tests: \2 success: \3 failures: \4 errors: \5 time: \6s/" \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] tests: \1 success: \2 failures: \3 errors: \4 time: \5s/" \
+    -e "/^$OPEN|/d" \
     -e "/^$ASSERT|s|/d" \
-    -e "/^$BEGIN/d" \
-    -e "/^$END/d" \
+    -e "/^$BEGIN|/d" \
+    -e "/^$END|/d" \
     -e "/^$CLOSE/d" >&3
 }
 
@@ -118,27 +118,30 @@ function summarize() {
 #################
 
 function assert_equals() { # assert that $1 is equal to $2
+  local called_by_line="${BASH_LINENO[0]}"
   if [[ "$1" -eq "$2" ]]; then
-    log_event "$ASSERT" "s|Success"
+    log_event "$ASSERT" "s|Success|$called_by_line"
   else
-    log_event "$ASSERT" "f|Expected $1 but got $2"
+    log_event "$ASSERT" "f|Expected $1 but got $2|$called_by_line"
   fi
 }
 
 function assert_none_empty() { # assert that $1 is not empty or only spaces
-  if [[ -z "${1// }" ]]; then
-    log_event "$ASSERT" "s|Success"
+  local called_by_line="${BASH_LINENO[0]}"
+  if [[ -n "${1// }" ]]; then
+    log_event "$ASSERT" "s|Success|$called_by_line"
   else
-    log_event "$ASSERT" "f|Value was empty, when expecting nonEmpty"
+    log_event "$ASSERT" "f|Value was empty, when expecting nonEmpty|$called_by_line"
   fi
 }
 
 
 function assert_is_substring_of() { # assert that $1 is a substring of $2
+  local called_by_line="${BASH_LINENO[0]}"
   if [[ "$2" =~ $1 ]]; then
-    log_event "$ASSERT" "s|Success"
+    log_event "$ASSERT" "s|Success|$called_by_line"
   else
-    log_event "$ASSERT" "f|'$1' was not a substring of '$2'"
+    log_event "$ASSERT" "f|'$1' was not a substring of '$2'|$called_by_line"
  fi
 }
 

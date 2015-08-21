@@ -7,4 +7,5 @@ function check_that_we_can_match_substring() {
 function check_that_we_can_assert_non_empty() {
   string="heioghopp"
   assert_none_empty "$string"
+  assert_none_empty "$string"
 }
