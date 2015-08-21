@@ -27,33 +27,23 @@ function log_event() {
   present_to_user "${event}"
 }
 
-function print_results() {
-  while read line; do
-    echo "$line"
-  done < "$test_logfile"
-}
-
 function present_to_user() {
-local green=$(echo -e '\e[32m')
-local red=$(echo -e '\e[31m')
-local reset=$(echo -e '\e[39m')
-echo "${1}" | sed \
-  -e "s/^$OPEN|\(.*\)|.*/\1:/" \
-  -e "s/^$BEGIN|\(.*\)|.*/  Running test: \1/" \
-  -e "s/^$TEST|.*|0|0|.*|.*/$green    [Ok] All asserts passed $reset/" \
-  -e "s/^$ASSERT|f|\(.*\)|.*/$red    [Failed] \1 $reset/" \
-  -e "s/^$ERROR|\(.*\)|.*|.*/$red    [Error] \1 $reset/" \
-  -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/ [Sum] success: \1 failures: \2 errors: \3 time: \4s/" \
-  -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] success: \1 failures: \2 errors: \3 time: \4s/" \
-  -e "/^$ASSERT|s|/d" \
-  -e "/^$TEST|.*/d" \
-  -e "/^$END/d" \
-  -e "/^$CLOSE/d" >&3
-}
-
-function stop_printer() {
-  # todo make this not static
-  kill %1
+  local green=$(echo -e '\e[32m')
+  local red=$(echo -e '\e[31m')
+  local reset=$(echo -e '\e[39m')
+  echo "${1}" | sed \
+    -e "s/^$OPEN|\(.*\)|.*/\1:/" \
+    -e "s/^$TEST|\(.*\)|s|.*/    \1 $green[Ok] $reset/" \
+    -e "s/^$TEST|\(.*\)|f|.*/    \1 $red[Failure] $reset/" \
+    -e "s/^$TEST|\(.*\)|e|.*/    \1 $red[Error] $reset/" \
+    -e "s/^$ASSERT|f|\(.*\)|.*/$red      \1 $reset/" \
+    -e "s/^$ERROR|\(.*\)|.*|.*/$red      \1 $reset/" \
+    -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/ [\1] tests: \2 success: \3 failures: \4 errors: \5 time: \6s/" \
+    -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] tests: \1 success: \2 failures: \3 errors: \4 time: \5s/" \
+    -e "/^$ASSERT|s|/d" \
+    -e "/^$BEGIN/d" \
+    -e "/^$END/d" \
+    -e "/^$CLOSE/d" >&3
 }
 
 function create_test_xml() {
@@ -86,30 +76,41 @@ function summarize_test() {
   errors=$(grep -c "^$ERROR" <(echo "$test_data"))
   seconds=$(cut -d '|' -f 3  <(echo "$test_data") | sed -e 1b -e '$!d' | sort -nr | paste -sd- - | bc)
 
-  log_event "$TEST" "${asserts}|${failures}|${errors}|${seconds}"
+  if [[ "$errors" -gt 0 ]]; then
+    status='e'
+  elif [[ "$failures" -gt 0 ]]; then
+    status='f'
+  else
+    status='s'
+  fi
+
+  log_event "$TEST" "${test_name}|${status}|${seconds}"
 }
 
 function summarize_file() {
   file_name=${1//\//\\/}
   file_data=$(awk '/^'"$OPEN"'\|'"$file_name"'\|/,/^'"$CLOSE"'\|'"$file_name"'/' "$test_logfile" | grep "^$TEST")
   # todo apply some more awk foo here
-  asserts=$(awk -F '|' '{sum+=$2} END {print sum}' <(echo "$file_data"))
-  failures=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$file_data"))
-  errors=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$file_data"))
-  seconds=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$file_data"))
+  stats=$(grep "^$TEST" <(echo "$file_data") | cut -d '|' -f 3 | sort | uniq -c)
+  tests=$(grep -c "^$TEST" <(echo "$file_data"))
+  asserts=$(sed -n 's/   \(.*\) s/\1/p' <(echo "$stats"))
+  failures=$(sed -n 's/   \(.*\) f/\1/p' <(echo "$stats"))
+  errors=$(sed -n 's/   \(.*\) e/\1/p' <(echo "$stats"))
+  seconds=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$file_data"))
 
-  log_event "$FILE" "${asserts}|${failures}|${errors}|${seconds}"
+  log_event "$FILE" "${1##*/}|${tests}|${asserts:-0}|${failures:-0}|${errors:-0}|${seconds}"
 }
 
 function summarize() {
   # todo apply some more awk foo here
   sum_data=$(grep "^$FILE" "$test_logfile")
-  asserts=$(awk -F '|' '{sum+=$2} END {print sum}' <(echo "$sum_data"))
-  failures=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$sum_data"))
-  errors=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$sum_data"))
-  seconds=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$sum_data"))
+  tests=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$sum_data"))
+  asserts=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$sum_data"))
+  failures=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$sum_data"))
+  errors=$(awk -F '|' '{sum+=$6} END {print sum}' <(echo "$sum_data"))
+  seconds=$(awk -F '|' '{sum+=$7} END {print sum}' <(echo "$sum_data"))
 
-  log_event "$SUMMARY" "${asserts}|${failures}|${errors}|${seconds}"
+  log_event "$SUMMARY" "${tests}|${asserts}|${failures}|${errors}|${seconds}"
 }
 
 #################
