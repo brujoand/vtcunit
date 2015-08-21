@@ -28,3 +28,9 @@ function check_long_test_with_side_effect() {
 function check_if_we_have_side_effect() {
   assert_equals "$myname" "anders"
 }
+
+
+function check_that_we_cant_die() {
+  assert_equals "ha" "ha"
+  thiscommandisntreal
+}

@@ -11,8 +11,16 @@ echo "" >> "$test_logfile"
 #### Statistics ####
 ####################
 
-function save_result() {
-  echo -e "${1}" >> "$test_logfile"
+OPEN='open'
+CLOSE='close'
+BEGIN='start'
+END='end'
+ASSERT='assert'
+ERROR='error'
+SUMMARY='summary'
+
+function log_event() {
+  echo -e "${1}|${2}|$(date +'%s')" >> "$test_logfile"
 }
 
 function print_results() {
@@ -21,8 +29,13 @@ function print_results() {
   done < "$test_logfile"
 }
 
-function tail_log() {
-  tail -f "$test_logfile" | cut -d '|' -f 1 &
+function start_printer() {
+  tail -f "$test_logfile"
+}
+
+function stop_printer() {
+  # todo make this not static
+  kill %1
 }
 
 #################
@@ -31,26 +44,26 @@ function tail_log() {
 
 function assert_equals() { # assert that $1 is equal to $2
   if [[ "$1" -eq "$2" ]]; then
-    save_result "\t\tSuccess|s|$(date +'%s')"
+    log_event "$ASSERT" "s|Success"
   else
-    save_result "\t\tExpected $1 but got $2|f|$(date +'%s')"
+    log_event "$ASSERT" "f|Expected $1 but got $2"
   fi
 }
 
 function assert_none_empty() { # assert that $1 is not empty or only spaces
   if [[ -z "${1// }" ]]; then
-    save_result "\t\tSuccess|s|$(date +'%s')"
+    log_event "$ASSERT" "s|Success"
   else
-    save_result "\t\tValue was empty, when expecting nonEmpty|f|$(date +'%s')"
+    log_event "$ASSERT" "f|Value was empty, when expecting nonEmpty"
   fi
 }
 
 
 function assert_is_substring_of() { # assert that $1 is a substring of $2
   if [[ "$2" =~ $1 ]]; then
-    save_result "\t\tSuccess|s|$(date +'%s')"
+    log_event "$ASSERT" "s|Success"
   else
-    save_result "\t\t'$1' was not a substring of '$2'|f|$(date +'%s')"
+    log_event "$ASSERT" "f|'$1' was not a substring of '$2'"
  fi
 }
 
@@ -63,7 +76,7 @@ function execute_function() {
     status=$?
 
     if [[ "$status" -gt 0 ]]; then
-      save_result "\t\t|${1}:${message}|${status}|$(date +'%s')"
+      log_event "$ERROR" "${message}|${status}"
     fi
 }
 
@@ -72,30 +85,31 @@ function check_file() {
   local test_file=$1
   . "$test_file"
 
-  save_result "$test_file|entering|$(date +'%s')"
+  log_event "$OPEN" "$test_file"
 
   # Run setup function if defined
   grep -q '^function setup()' "$test_file" && execute_function "setup"
 
   sed -n 's/^function \(check_.*\)().*/\1/p' "$test_file" | while IFS= read -r test_name; do
-    save_result "\t$test_name|entering|$(date +'%s')"
+    log_event "$BEGIN" "$test_name"
     execute_function "$test_name"
-    save_result "\t$test_name|exiting|$(date +'%s')"
+    log_event "$END" "$test_name"
   done
 
   # Run cleanup if defined
   grep -q '^function cleanup()' "$test_file" && execute_function "cleanup"
 
-  save_result "$test_file|exiting|$(date +'%s')"
+  log_event "$CLOSE" "$test_file"
 }
 
 function run_tests() {
   # generate a summary
   # create a rapport
-  tail_log
+  start_printer &
   while IFS= read -r -d '' file; do
     (check_file "$file")
   done < <(find "$test_folder" -type f \( -name '*.bash' -or -name '*.sh' \) -print0)
+  stop_printer
 }
 
 #######################
