@@ -5,6 +5,7 @@ target_folder="$(pwd)/test-reports"
 mkdir -p "$target_folder"
 test_logfile="$target_folder/test.log"
 echo "" >> "$test_logfile"
+exec 3>&1
 
 ####################
 #### Statistics ####
@@ -21,7 +22,9 @@ FILE='file'
 SUMMARY='summary'
 
 function log_event() {
-  echo -e "${1}|${2}|$(date +'%s')" >> "$test_logfile"
+  local event="${1}|${2}|$(date +'%s')"
+  echo -e "${event}" >> "$test_logfile"
+  present_to_user "${event}"
 }
 
 function print_results() {
@@ -30,22 +33,22 @@ function print_results() {
   done < "$test_logfile"
 }
 
-function start_printer() {
+function present_to_user() {
 local green=$(echo -e '\e[32m')
 local red=$(echo -e '\e[31m')
 local reset=$(echo -e '\e[39m')
-tail -f "$test_logfile" | sed \
-  -e "s/^$OPEN|\(.*\)|.*/\1/" \
-  -e "s/^$BEGIN|\(.*\)|.*/ \1/" \
-  -e "s/^$TEST|.*|0|0|.*|.*/  $green[Ok]$reset/" \
-  -e "s/^$ASSERT|f|\(.*\)|.*/  $red[Failed] \1$reset/" \
-  -e "s/^$ERROR|\(.*\)|.*|.*/  $red[Error] \1$reset/" \
-  -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/ [sum] success: \1 failures: \2 errors: \3 time: \4/" \
-  -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] success: \1 failures: \2 errors: \3 time: \4/" \
+echo "${1}" | sed \
+  -e "s/^$OPEN|\(.*\)|.*/\1:/" \
+  -e "s/^$BEGIN|\(.*\)|.*/  Running test: \1/" \
+  -e "s/^$TEST|.*|0|0|.*|.*/$green    [Ok] All asserts passed $reset/" \
+  -e "s/^$ASSERT|f|\(.*\)|.*/$red    [Failed] \1 $reset/" \
+  -e "s/^$ERROR|\(.*\)|.*|.*/$red    [Error] \1 $reset/" \
+  -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/ [Sum] success: \1 failures: \2 errors: \3 time: \4s/" \
+  -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] success: \1 failures: \2 errors: \3 time: \4s/" \
   -e "/^$ASSERT|s|/d" \
   -e "/^$TEST|.*/d" \
   -e "/^$END/d" \
-  -e "/^$CLOSE/d"
+  -e "/^$CLOSE/d" >&3
 }
 
 function stop_printer() {
@@ -178,12 +181,10 @@ function check_file() {
 function run_tests() {
   # generate a summary
   # create a rapport
-  start_printer &
   while IFS= read -r -d '' file; do
     (check_file "$file")
   done < <(find "$test_folder" -type f \( -name '*.bash' -or -name '*.sh' \) -print0)
   summarize
-  stop_printer
 }
 
 #######################

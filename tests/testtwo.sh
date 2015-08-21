@@ -21,7 +21,7 @@ function check_that_fails() {
 
 function check_long_test_with_side_effect() {
   myname=shit
-  sleep 3
+  sleep 1
   assert_equals 1 1
 }
 
