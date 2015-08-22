@@ -4,7 +4,8 @@ target_folder="$(pwd)/test-reports"
 [[ -d "$target_folder" ]] && rm -rf "$target_folder"
 mkdir -p "$target_folder"
 test_logfile="$target_folder/test.log"
-echo "" >> "$test_logfile"
+xml_output_file="$target_folder/test.xml"
+touch "$test_logfile"
 exec 3>&1
 
 ####################
@@ -28,6 +29,9 @@ function log_event() {
   echo -e "${event}" >> "$test_logfile"
 
   case $event_type in
+    $OPEN)
+      present_to_user "${event}"
+      ;;
     $TEST)
       present_to_user "${event}"
       present_latest_problems
@@ -48,11 +52,12 @@ function present_to_user() {
   local red=$(echo -e '\e[31m')
   local reset=$(echo -e '\e[39m')
   echo "${1}" | sed \
+    -e "s/^$OPEN|\(.*\)|.*/  \1:/" \
     -e "s/^$TEST|\(.*\)|s|.*/$green    +$reset \1/" \
     -e "s/^$TEST|\(.*\)|.*|.*|.*/$red    -$reset \1/" \
     -e "s/^$ASSERT|f|\(.*\)|\(.*\)|.*/$red      [Failure]$reset line: \2 \1/" \
     -e "s/^$ERROR|\(.*\)|.*|.*/$red      [Error]$reset \1/" \
-    -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/ [\1] tests: \2 success: \3 failures: \4 errors: \5 time: \6s/" \
+    -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/  [Sum] tests: \2 success: \3 failures: \4 errors: \5 time: \6s/" \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] tests: \1 success: \2 failures: \3 errors: \4 time: \5s/" \
     -e "/^$ASSERT|s|/d" >&3
 }
@@ -62,26 +67,18 @@ function present_latest_problems() { # I don't really like this :/
   present_to_user "${problems}"
 }
 
-function create_test_xml() {
+function generate_junit_xml() {
+sed '1!G;h;$!d' test-reports/test.log | grep -E "(^$ASSERT|^$ERROR|^$TEST|^$FILE|^$SUMMARY|^$BEGIN|^$OPEN)" | sed \
+    -e "/^$ASSERT|s|/d" \
+    -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
+    -e "s/^$FILE|\(.*\)|\(.*\)|.*|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
+    -e "s/^$ASSERT|f|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>\1<\/failure>/" \
+    -e "s/^$ERROR|\(.*\)|.*|.*/<error message='Error' type='error'>\1<\/error>/" \
+    -e "s/^$TEST|\(.*\)|.*|\(.*\)|.*/<testcase name='\1' time='\2'>/" \
+    -e "s/^$BEGIN|.*/<\/testcase>/" \
+    -e "s/^$OPEN|.*/<\/testsuite>/" > "$xml_output_file"
+  echo "</testsuites>" >> "$xml_output_file"
 
-  sed -e "s/^$OPEN|\(.*\)|.*/\1/" \
-    -e "s/^$START|\(.*\)|.*/<testcase classname=\"$file_name\" name=\"\1\" time=\"0\">/" \
-    -e "s/^$ASSERT|s|\(.*\)|.*//" \ # NOOP
-    -e "s/^$ASSERT|f|\(.*\)|.*/<failure message=\"Assertion failed\" type=\"failure\">\1<\/failure>/" \
-    -e "s/^$ERROR|\(.*\)|.*|.*/<failure message=\"Error\" type=\"error\">\1<\/failure>/" \
-    -e "s/^$END/<\/testcase>/" \
-    -e "s/^$CLOSE/<\/testsuite>/"
-
-
-}
-
-function create_test_suites() {
-  local erros=$(grep -c "^$ERROR|" "$test_logfile")
-  local fails=$(grep -c "^$ASSERT|f|" "$test_logfile")
-  for suite in $(sed -n "s/^$OPEN|\(.*\)|.*/\1/p" "$test_logfile"); do
-    escaped=${suite//\//\\/}
-    awk '/^'"$OPEN"'\|'"$escaped"'\|/,/^'"$CLOSE"'\|'"$escaped"'/' "$test_logfile"
-  done
 }
 
 function summarize_test() {
@@ -114,7 +111,7 @@ function summarize_file() {
   errors=$(sed -n 's/   \(.*\) e/\1/p' <(echo "$stats"))
   seconds=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$file_data"))
 
-  log_event "$FILE" "${1##*/}|${tests}|${asserts:-0}|${failures:-0}|${errors:-0}|${seconds}"
+  log_event "$FILE" "${1}|${tests}|${asserts:-0}|${failures:-0}|${errors:-0}|${seconds}"
 }
 
 function summarize() {
@@ -205,6 +202,7 @@ function run_tests() {
     (check_file "$file")
   done < <(find "$test_folder" -type f \( -name '*.bash' -or -name '*.sh' \) -print0)
   summarize
+  generate_junit_xml
 }
 
 #######################
