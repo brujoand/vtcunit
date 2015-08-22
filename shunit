@@ -22,9 +22,25 @@ FILE='file'
 SUMMARY='summary'
 
 function log_event() {
-  local event="${1}|${2}|$(date +'%s')"
+  local event_type=$1
+  local event_data=$2
+  local event="${event_type}|${event_data}|$(date +'%s')"
   echo -e "${event}" >> "$test_logfile"
-  present_to_user "${event}"
+
+  case $event_type in
+    $TEST)
+      present_to_user "${event}"
+      present_latest_problems
+      ;;
+    $FILE)
+      present_to_user "${event}"
+      present_to_user ""
+      ;;
+    $SUMMARY)
+      present_to_user "${event}"
+      ;;
+  esac
+
 }
 
 function present_to_user() {
@@ -44,6 +60,11 @@ function present_to_user() {
     -e "/^$BEGIN|/d" \
     -e "/^$END|/d" \
     -e "/^$CLOSE/d" >&3
+}
+
+function present_latest_problems() { # I don't really like this :/
+  local problems=$(sed '1!G;h;$!d' "$test_logfile" | sed -e "/^$BEGIN|/,\$d" | grep -E "(^$ERROR|^$ASSERT)")
+  present_to_user "${problems}"
 }
 
 function create_test_xml() {
