@@ -57,8 +57,8 @@ function present_to_user() {
     -e "s/^$TEST|\(.*\)|.*|.*|.*/$red    -$reset \1/" \
     -e "s/^$ASSERT|f|\(.*\)|\(.*\)|.*/$red      [Failure]$reset line: \2 \1/" \
     -e "s/^$ERROR|\(.*\)|.*|.*/$red      [Error]$reset \1/" \
-    -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/  [Sum] tests: \2 success: \3 failures: \4 errors: \5 time: \6s/" \
-    -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] tests: \1 success: \2 failures: \3 errors: \4 time: \5s/" \
+    -e "s/^$FILE|.*|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/  [Sum] tests: \1 failures: \2 errors: \3 time: \4s/" \
+    -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] tests: \1 failures: \2 errors: \3 time: \4s/" \
     -e "/^$ASSERT|s|/d" >&3
 }
 
@@ -70,8 +70,8 @@ function present_latest_problems() { # I don't really like this :/
 function generate_junit_xml() {
 sed '1!G;h;$!d' test-reports/test.log | grep -E "(^$ASSERT|^$ERROR|^$TEST|^$FILE|^$SUMMARY|^$BEGIN|^$OPEN)" | sed \
     -e "/^$ASSERT|s|/d" \
-    -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
-    -e "s/^$FILE|\(.*\)|\(.*\)|.*|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
+    -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
+    -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
     -e "s/^$ASSERT|f|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>\1<\/failure>/" \
     -e "s/^$ERROR|\(.*\)|.*|.*/<error message='Error' type='error'>\1<\/error>/" \
     -e "s/^$TEST|\(.*\)|.*|\(.*\)|.*/<testcase name='\1' time='\2'>/" \
@@ -84,7 +84,6 @@ sed '1!G;h;$!d' test-reports/test.log | grep -E "(^$ASSERT|^$ERROR|^$TEST|^$FILE
 function summarize_test() {
   test_name=$1
   test_data=$(awk '/^'"$BEGIN"'\|'"$test_name"'\|/,/^'"$END"'\|'"$test_name"'/' "$test_logfile")
-  asserts=$(grep -c "^$ASSERT|s|" <(echo "$test_data"))
   failures=$(grep -c "^$ASSERT|f|" <(echo "$test_data"))
   errors=$(grep -c "^$ERROR" <(echo "$test_data"))
   seconds=$(cut -d '|' -f 3  <(echo "$test_data") | sed -e 1b -e '$!d' | sort -nr | paste -sd- - | bc)
@@ -106,24 +105,22 @@ function summarize_file() {
   # todo apply some more awk foo here
   stats=$(grep "^$TEST" <(echo "$file_data") | cut -d '|' -f 3 | sort | uniq -c)
   tests=$(grep -c "^$TEST" <(echo "$file_data"))
-  asserts=$(sed -n 's/   \(.*\) s/\1/p' <(echo "$stats"))
   failures=$(sed -n 's/   \(.*\) f/\1/p' <(echo "$stats"))
   errors=$(sed -n 's/   \(.*\) e/\1/p' <(echo "$stats"))
   seconds=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$file_data"))
 
-  log_event "$FILE" "${1}|${tests}|${asserts:-0}|${failures:-0}|${errors:-0}|${seconds}"
+  log_event "$FILE" "${1}|${tests:-0}|${failures:-0}|${errors:-0}|${seconds}"
 }
 
 function summarize() {
   # todo apply some more awk foo here
   sum_data=$(grep "^$FILE" "$test_logfile")
   tests=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$sum_data"))
-  asserts=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$sum_data"))
-  failures=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$sum_data"))
-  errors=$(awk -F '|' '{sum+=$6} END {print sum}' <(echo "$sum_data"))
-  seconds=$(awk -F '|' '{sum+=$7} END {print sum}' <(echo "$sum_data"))
+  failures=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$sum_data"))
+  errors=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$sum_data"))
+  seconds=$(awk -F '|' '{sum+=$6} END {print sum}' <(echo "$sum_data"))
 
-  log_event "$SUMMARY" "${tests}|${asserts}|${failures}|${errors}|${seconds}"
+  log_event "$SUMMARY" "${tests}|${failures}|${errors}|${seconds}"
 }
 
 #################
