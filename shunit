@@ -18,6 +18,7 @@ BEGIN='begin'
 END='end'
 ASSERT='assert'
 ERROR='error'
+MESSAGE='message'
 TEST='test'
 FILE='file'
 SUMMARY='summary'
@@ -63,17 +64,20 @@ function present_to_user() {
 }
 
 function present_latest_problems() { # I don't really like this :/
-  local problems=$(sed '1!G;h;$!d' "$test_logfile" | sed -e "/^$BEGIN|/,\$d" | grep -E "(^$ERROR|^$ASSERT)")
+  local problems=$(sed '1!G;h;$!d' "$test_logfile" | sed "/^$BEGIN|/q" | grep -E "(^$ERROR|^$ASSERT)")
   present_to_user "${problems}"
 }
 
 function generate_junit_xml() {
-{ sed '1!G;h;$!d' test-reports/test.log | grep -E "(^$ASSERT|^$ERROR|^$TEST|^$FILE|^$SUMMARY|^$BEGIN|^$OPEN)" | sed \
+{ sed '1!G;h;$!d' "$test_logfile" | grep -E "(^$ASSERT|^$ERROR|^$TEST|^$FILE|^$SUMMARY|^$BEGIN|^$OPEN|^$MESSAGE)" | sed \
     -e "/^$ASSERT|s|/d" \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
     -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
-    -e "s/^$ASSERT|f|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>\1<\/failure>/" \
-    -e "s/^$ERROR|\(.*\)|.*|.*/<error message='Error' type='error'>\1<\/error>/" \
+    -e "s/^$ASSERT|f|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>/" \
+    -e "s/^$MESSAGE|#$ASSERT#|.*/<\/failure>/" \
+    -e "s/^$MESSAGE|#$ERROR#|.*/<\/error>/" \
+    -e "s/^$MESSAGE|\(.*\)|.*/\1/" \
+    -e "s/^$ERROR|\(.*\)|.*|.*/<error message='Error' type='error'>/" \
     -e "s/^$TEST|\(.*\)|.*|\(.*\)|.*/<testcase name='\1' time='\2'>/" \
     -e "s/^$BEGIN|.*/<\/testcase>/" \
     -e "s/^$OPEN|.*/<\/testsuite>/"; echo "</testsuites>"; } | xmllint --format - > "$xml_output_file"
@@ -81,10 +85,10 @@ function generate_junit_xml() {
 
 function summarize_test() {
   test_name=$1
-  test_data=$(awk '/^'"$BEGIN"'\|'"$test_name"'\|/,/^'"$END"'\|'"$test_name"'/' "$test_logfile")
+  test_data=$(sed '1!G;h;$!d' "$test_logfile" | sed "/^$BEGIN/q")
   failures=$(grep -c "^$ASSERT|f|" <(echo "$test_data"))
   errors=$(grep -c "^$ERROR" <(echo "$test_data"))
-  seconds=$(cut -d '|' -f 3  <(echo "$test_data") | sed -e 1b -e '$!d' | sort -nr | paste -sd- - | bc)
+  seconds=$(grep -E "(^$BEGIN|^$END)" <(echo "$test_data") | cut -d '|' -f 3 | sort -nr | paste -sd- - | bc)
 
   if [[ "$errors" -gt 0 ]]; then
     status='e'
@@ -98,14 +102,12 @@ function summarize_test() {
 }
 
 function summarize_file() {
-  file_name=${1//\//\\/}
-  file_data=$(awk '/^'"$OPEN"'\|'"$file_name"'\|/,/^'"$CLOSE"'\|'"$file_name"'/' "$test_logfile" | grep "^$TEST")
+  file_data=$(sed '1!G;h;$!d' "$test_logfile" | sed "/^$OPEN/q")
   # todo apply some more awk foo here
-  stats=$(grep "^$TEST" <(echo "$file_data") | cut -d '|' -f 3 | sort | uniq -c)
   tests=$(grep -c "^$TEST" <(echo "$file_data"))
-  failures=$(sed -n 's/   \(.*\) f/\1/p' <(echo "$stats"))
-  errors=$(sed -n 's/   \(.*\) e/\1/p' <(echo "$stats"))
-  seconds=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$file_data"))
+  failures=$(grep -c "^$ASSERT|f|" <(echo "$file_data"))
+  errors=$(grep -c "^$ERROR" <(echo "$file_data"))
+  seconds=$(grep "^$TEST" <(echo "$file_data") | awk -F '|' '{sum+=$4} END {print sum}')
 
   log_event "$FILE" "${1}|${tests:-0}|${failures:-0}|${errors:-0}|${seconds}"
 }
@@ -130,7 +132,8 @@ function assert_equals() { # assert that $1 is equal to $2
   if [[ "$1" -eq "$2" ]]; then
     log_event "$ASSERT" "s|Success|$called_by_line"
   else
-    log_event "$ASSERT" "f|Expected $1 but got $2|$called_by_line"
+    message=$(overflow_message "$ASSERT" "Expected ${1} but got ${2}")
+    log_event "$ASSERT" "f|$message|$called_by_line"
   fi
 }
 
@@ -149,7 +152,8 @@ function assert_is_substring_of() { # assert that $1 is a substring of $2
   if [[ "$2" =~ $1 ]]; then
     log_event "$ASSERT" "s|Success|$called_by_line"
   else
-    log_event "$ASSERT" "f|'$1' was not a substring of '$2'|$called_by_line"
+    message=$(overflow_message "$ASSERT" "${1} was not a substring of ${2}")
+    log_event "$ASSERT" "f|$message|$called_by_line"
  fi
 }
 
@@ -157,14 +161,33 @@ function assert_is_substring_of() { # assert that $1 is a substring of $2
 #### Test Running ####
 ######################
 
+function overflow_message() { # Only put one message in the error/assert
+  action=$1
+  full_message=$2
+  log_event "$MESSAGE" "#$action#"
+  for l in ${full_message}; do
+    log_event "$MESSAGE" "$l"
+  done
+  if [[ "$(echo "${full_message}" | wc -l)" -gt 1 ]]; then
+    echo "$(echo "${full_message}" | head -n 1) (see output xml for full message)"
+  else
+    echo "$full_message"
+  fi
+}
+
 function execute_function() {
-    output=$($1 2>&1)
+    test_name=$1
+    log_event "$BEGIN" "$test_name"
+    output=$($test_name 2>&1)
     status=$?
 
     if [[ "$status" -gt 0 ]]; then
-      message=$(echo "$output" | sed 's/.*: \(line .*\)/\1/')
+      message=$(overflow_message "$ERROR" "${output}")
       log_event "$ERROR" "${message}|${status}"
     fi
+
+    log_event "$END" "$test_name"
+    summarize_test "$test_name"
 }
 
 function check_file() {
@@ -178,10 +201,7 @@ function check_file() {
   grep -q '^function setup()' "$test_file" && execute_function "setup"
 
   sed -n 's/^function \(check_.*\)().*/\1/p' "$test_file" | while IFS= read -r test_name; do
-    log_event "$BEGIN" "$test_name"
     execute_function "$test_name"
-    log_event "$END" "$test_name"
-    summarize_test "$test_name"
   done
 
   # Run cleanup if defined

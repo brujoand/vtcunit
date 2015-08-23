@@ -4,7 +4,6 @@ myname=""
 
 function setup() {
   myname=anders
-  echo "doing my setup"
 }
 
 function cleanup() {
