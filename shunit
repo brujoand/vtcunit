@@ -55,7 +55,7 @@ function present_to_user() {
     -e "s/^$OPEN|\(.*\)|.*/  \1:/" \
     -e "s/^$TEST|\(.*\)|s|.*/$green    +$reset \1/" \
     -e "s/^$TEST|\(.*\)|.*|.*|.*/$red    -$reset \1/" \
-    -e "s/^$ASSERT|f|\(.*\)|\(.*\)|.*/$red      [Failure]$reset line: \2 \1/" \
+    -e "s/^$ASSERT|f|\(.*\)|\(.*\)|.*/$red      [Failure]$reset line \2: \1/" \
     -e "s/^$ERROR|\(.*\)|.*|.*/$red      [Error]$reset \1/" \
     -e "s/^$FILE|.*|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/  [Sum] tests: \1 failures: \2 errors: \3 time: \4s/" \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] tests: \1 failures: \2 errors: \3 time: \4s/" \
@@ -68,7 +68,7 @@ function present_latest_problems() { # I don't really like this :/
 }
 
 function generate_junit_xml() {
-sed '1!G;h;$!d' test-reports/test.log | grep -E "(^$ASSERT|^$ERROR|^$TEST|^$FILE|^$SUMMARY|^$BEGIN|^$OPEN)" | sed \
+{ sed '1!G;h;$!d' test-reports/test.log | grep -E "(^$ASSERT|^$ERROR|^$TEST|^$FILE|^$SUMMARY|^$BEGIN|^$OPEN)" | sed \
     -e "/^$ASSERT|s|/d" \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
     -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
@@ -76,9 +76,7 @@ sed '1!G;h;$!d' test-reports/test.log | grep -E "(^$ASSERT|^$ERROR|^$TEST|^$FILE
     -e "s/^$ERROR|\(.*\)|.*|.*/<error message='Error' type='error'>\1<\/error>/" \
     -e "s/^$TEST|\(.*\)|.*|\(.*\)|.*/<testcase name='\1' time='\2'>/" \
     -e "s/^$BEGIN|.*/<\/testcase>/" \
-    -e "s/^$OPEN|.*/<\/testsuite>/" > "$xml_output_file"
-  echo "</testsuites>" >> "$xml_output_file"
-
+    -e "s/^$OPEN|.*/<\/testsuite>/"; echo "</testsuites>"; } | xmllint --format - > "$xml_output_file"
 }
 
 function summarize_test() {
@@ -160,10 +158,11 @@ function assert_is_substring_of() { # assert that $1 is a substring of $2
 ######################
 
 function execute_function() {
-    message=$($1 2>&1)
+    output=$($1 2>&1)
     status=$?
 
     if [[ "$status" -gt 0 ]]; then
+      message=$(echo "$output" | sed 's/.*: \(line .*\)/\1/')
       log_event "$ERROR" "${message}|${status}"
     fi
 }
