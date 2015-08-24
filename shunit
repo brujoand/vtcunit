@@ -158,8 +158,8 @@ function overflow_message() { # Only put one message in the error/assert
   action=$1
   full_message=$2
   log_event "$MESSAGE" "#$action#"
-  for l in ${full_message}; do
-    log_event "$MESSAGE" "$l"
+  sed '1!G;h;$!d' <(echo "${full_message}") | while IFS= read -r line; do
+    log_event "$MESSAGE" "$line"
   done
   if [[ "$(echo "${full_message}" | wc -l)" -gt 1 ]]; then
     echo "$(echo "${full_message}" | head -n 1) (see output xml for full message)"
