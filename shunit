@@ -16,7 +16,7 @@ OPEN='open'
 CLOSE='close'
 BEGIN='begin'
 END='end'
-ASSERT='assert'
+FAILURE='failure'
 ERROR='error'
 MESSAGE='message'
 TEST='test'
@@ -35,11 +35,11 @@ function log_event() {
       ;;
     $TEST)
       present_to_user "${event}"
-      present_latest_problems
+      present_to_user "$(get_latest_problems)"
       ;;
     $FILE)
       present_to_user "${event}"
-      present_to_user ""
+      present_to_user " " # Create some air
       ;;
     $SUMMARY)
       present_to_user "${event}"
@@ -56,25 +56,23 @@ function present_to_user() {
     -e "s/^$OPEN|\(.*\)|.*/  \1:/" \
     -e "s/^$TEST|\(.*\)|s|.*/$green    +$reset \1/" \
     -e "s/^$TEST|\(.*\)|.*|.*|.*/$red    -$reset \1/" \
-    -e "s/^$ASSERT|f|\(.*\)|\(.*\)|.*/$red      [Failure]$reset line \2: \1/" \
+    -e "s/^$FAILURE|\(.*\)|\(.*\)|.*/$red      [Failure]$reset line \2: \1/" \
     -e "s/^$ERROR|\(.*\)|.*|.*/$red      [Error]$reset \1/" \
     -e "s/^$FILE|.*|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/  [Sum] tests: \1 failures: \2 errors: \3 time: \4s/" \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] tests: \1 failures: \2 errors: \3 time: \4s/" \
-    -e "/^$ASSERT|s|/d" >&3
+    -e '/^$/d' >&3
 }
 
-function present_latest_problems() { # I don't really like this :/
-  local problems=$(sed '1!G;h;$!d' "$test_logfile" | sed "/^$BEGIN|/q" | grep -E "(^$ERROR|^$ASSERT)")
-  present_to_user "${problems}"
+function get_latest_problems() { # I don't really like this :/
+  sed '1!G;h;$!d' "$test_logfile" | sed "/^$BEGIN|/q" | grep -E "(^$ERROR|^$FAILURE)"
 }
 
 function generate_junit_xml() {
-{ sed '1!G;h;$!d' "$test_logfile" | grep -E "(^$ASSERT|^$ERROR|^$TEST|^$FILE|^$SUMMARY|^$BEGIN|^$OPEN|^$MESSAGE)" | sed \
-    -e "/^$ASSERT|s|/d" \
+{ sed '1!G;h;$!d' "$test_logfile" | grep -E "(^$FAILURE|^$ERROR|^$TEST|^$FILE|^$SUMMARY|^$BEGIN|^$OPEN|^$MESSAGE)" | sed \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
     -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
-    -e "s/^$ASSERT|f|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>/" \
-    -e "s/^$MESSAGE|#$ASSERT#|.*/<\/failure>/" \
+    -e "s/^$FAILURE|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>/" \
+    -e "s/^$MESSAGE|#$FAILURE#|.*/<\/failure>/" \
     -e "s/^$MESSAGE|#$ERROR#|.*/<\/error>/" \
     -e "s/^$MESSAGE|\(.*\)|.*/\1/" \
     -e "s/^$ERROR|\(.*\)|.*|.*/<error message='Error' type='error'>/" \
@@ -86,7 +84,7 @@ function generate_junit_xml() {
 function summarize_test() {
   test_name=$1
   test_data=$(sed '1!G;h;$!d' "$test_logfile" | sed "/^$BEGIN/q")
-  failures=$(grep -c "^$ASSERT|f|" <(echo "$test_data"))
+  failures=$(grep -c "^$FAILURE" <(echo "$test_data"))
   errors=$(grep -c "^$ERROR" <(echo "$test_data"))
   seconds=$(grep -E "(^$BEGIN|^$END)" <(echo "$test_data") | cut -d '|' -f 3 | sort -nr | paste -sd- - | bc)
 
@@ -105,7 +103,7 @@ function summarize_file() {
   file_data=$(sed '1!G;h;$!d' "$test_logfile" | sed "/^$OPEN/q")
   # todo apply some more awk foo here
   tests=$(grep -c "^$TEST" <(echo "$file_data"))
-  failures=$(grep -c "^$ASSERT|f|" <(echo "$file_data"))
+  failures=$(grep -c "^$FAILURE" <(echo "$file_data"))
   errors=$(grep -c "^$ERROR" <(echo "$file_data"))
   seconds=$(grep "^$TEST" <(echo "$file_data") | awk -F '|' '{sum+=$4} END {print sum}')
 
@@ -129,31 +127,26 @@ function summarize() {
 
 function assert_equals() { # assert that $1 is equal to $2
   local called_by_line="${BASH_LINENO[0]}"
-  if [[ "$1" -eq "$2" ]]; then
-    log_event "$ASSERT" "s|Success|$called_by_line"
-  else
-    message=$(overflow_message "$ASSERT" "Expected ${1} but got ${2}")
-    log_event "$ASSERT" "f|$message|$called_by_line"
+  if [[ ! "$1" -eq "$2" ]]; then
+    message=$(overflow_message "$FAILURE" "Expected ${1} but got ${2}")
+    log_event "$FAILURE" "$message|$called_by_line"
   fi
 }
 
 function assert_none_empty() { # assert that $1 is not empty or only spaces
   local called_by_line="${BASH_LINENO[0]}"
   if [[ -n "${1// }" ]]; then
-    log_event "$ASSERT" "s|Success|$called_by_line"
-  else
-    log_event "$ASSERT" "f|Value was empty, when expecting nonEmpty|$called_by_line"
+    message=$(overflow_message "$FAILURE" "Value was empty, when expecting nonEmpty")
+    log_event "$FAILURE" "$message|$called_by_line"
   fi
 }
 
 
 function assert_is_substring_of() { # assert that $1 is a substring of $2
   local called_by_line="${BASH_LINENO[0]}"
-  if [[ "$2" =~ $1 ]]; then
-    log_event "$ASSERT" "s|Success|$called_by_line"
-  else
-    message=$(overflow_message "$ASSERT" "${1} was not a substring of ${2}")
-    log_event "$ASSERT" "f|$message|$called_by_line"
+  if [[ ! "$2" =~ $1 ]]; then
+    message=$(overflow_message "$FAILURE" "${1} was not a substring of ${2}")
+    log_event "$FAILURE" "$message|$called_by_line"
  fi
 }
 
