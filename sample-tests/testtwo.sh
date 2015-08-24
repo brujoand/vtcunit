@@ -11,6 +11,7 @@ function cleanup() {
 }
 
 function test_that_we_have_a_name() {
+  bauta_log "This is some logging"
   assert_equals "$myname" "anders"
 }
 

@@ -7,4 +7,5 @@ function test_that_we_can_match_substring() {
 function test_that_we_can_assert_non_empty() {
   string="heioghopp"
   assert_none_empty "$string"
+  echo "This hould not print anywhere"
 }
