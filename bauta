@@ -63,12 +63,16 @@ function present_to_user() {
     -e '/^$/d' >&3
 }
 
+function get_latest_events() {
+  sed '1!G;h;$!d' "$test_logfile"
+}
+
 function get_latest_problems() { # I don't really like this :/
-  sed '1!G;h;$!d' "$test_logfile" | sed "/^$BEGIN|/q" | grep -E "(^$ERROR|^$FAILURE)"
+  get_latest_events | sed "/^$BEGIN|/q" | grep -E "(^$ERROR|^$FAILURE)"
 }
 
 function generate_junit_xml() {
-{ sed '1!G;h;$!d' "$test_logfile" | grep -E "(^$FAILURE|^$ERROR|^$TEST|^$FILE|^$SUMMARY|^$BEGIN|^$OPEN|^$MESSAGE)" | sed \
+{ get_latest_events | sed \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
     -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
     -e "s/^$FAILURE|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>/" \
@@ -78,12 +82,14 @@ function generate_junit_xml() {
     -e "s/^$ERROR|\(.*\)|.*|.*/<error message='Error' type='error'>/" \
     -e "s/^$TEST|\(.*\)|.*|\(.*\)|.*/<testcase name='\1' time='\2'>/" \
     -e "s/^$BEGIN|.*/<\/testcase>/" \
-    -e "s/^$OPEN|.*/<\/testsuite>/"; echo "</testsuites>"; } | xmllint --format - > "$xml_output_file"
+    -e "s/^$OPEN|.*/<\/testsuite>/" \
+    -e "/^$END/d" \
+    -e "/^$CLOSE/d" ; echo "</testsuites>"; }  | xmllint --format - > "$xml_output_file"
 }
 
 function summarize_test() {
   test_name=$1
-  test_data=$(sed '1!G;h;$!d' "$test_logfile" | sed "/^$BEGIN/q")
+  test_data=$(get_latest_events | sed "/^$BEGIN/q")
   failures=$(grep -c "^$FAILURE" <(echo "$test_data"))
   errors=$(grep -c "^$ERROR" <(echo "$test_data"))
   seconds=$(grep -E "(^$BEGIN|^$END)" <(echo "$test_data") | cut -d '|' -f 3 | sort -nr | paste -sd- - | bc)
@@ -100,7 +106,7 @@ function summarize_test() {
 }
 
 function summarize_file() {
-  file_data=$(sed '1!G;h;$!d' "$test_logfile" | sed "/^$OPEN/q")
+  file_data=$(get_latest_events | sed "/^$OPEN/q")
   # todo apply some more awk foo here
   tests=$(grep -c "^$TEST" <(echo "$file_data"))
   failures=$(grep -c "^$FAILURE" <(echo "$file_data"))
