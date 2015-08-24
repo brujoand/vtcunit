@@ -191,6 +191,7 @@ function process_test() {
     handle_event "$BEGIN" "$test_name"
 
     # This variable can't be made local. Find out why
+    local output status
     output=$($test_name 2>&1)
     status=$?
 
