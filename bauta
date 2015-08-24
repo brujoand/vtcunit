@@ -1,12 +1,4 @@
 #! /usr/bin/env bash
-test_folder=${1%/}
-target_folder="$(pwd)/test-reports"
-[[ -d "$target_folder" ]] && rm -rf "$target_folder"
-mkdir -p "$target_folder"
-test_logfile="$target_folder/test.log"
-xml_output_file="$target_folder/test.xml"
-touch "$test_logfile"
-exec 3>&1
 
 ####################
 #### Statistics ####
@@ -126,6 +118,7 @@ function summarize_all_files() {
   local seconds=$(awk -F '|' '{sum+=$6} END {print sum}' <(echo "$sum_data"))
 
   handle_event "$SUMMARY" "${tests}|${failures}|${errors}|${seconds}"
+  return $(( errors + failures ))
 }
 
 #################
@@ -181,7 +174,7 @@ function process_helper() {
   local tmp_file="/tmp/bauta.$test_name.$RANDOM.tmp"
   "$test_name" &> "$tmp_file"
   local status=$?
-  local output=$(cat $tmp_file)
+  local output=$(cat "$tmp_file")
 
   if [[ "$status" -gt 0 ]]; then
     handle_event "$BEGIN" "$test_name"
@@ -197,8 +190,9 @@ function process_test() {
     local test_name=$1
     handle_event "$BEGIN" "$test_name"
 
-    local output=$($test_name 2>&1)
-    local status=$?
+    # This variable can't be made local. Find out why
+    output=$($test_name 2>&1)
+    status=$?
 
     if [[ "$status" -gt 0 ]]; then
       local message=$(overflow_message "$ERROR" "${output}")
@@ -234,12 +228,35 @@ function process_test_folder() {
   while IFS= read -r -d '' file; do
     (process_file "$file")
   done < <(find "$test_folder" -type f \( -name '*.bash' -or -name '*.sh' \) -print0)
-  summarize_all_files
+  local problems=$(summarize_all_files)
   write_events_as_xml
+  if [[ "$problems" == 0 ]]; then
+    exit 0
+  else
+    exit 1
+  fi
 }
 
 #######################
 #### Main handling ####
 #######################
 
+exec 3>&1 # make stdout avalable to subshells
+test_folder=${1%/}
+target_folder="$(pwd)/test-reports"
+test_logfile="$target_folder/test.log"
+xml_output_file="$target_folder/test.xml"
+
+function reset_output_dir() {
+  [[ -d "$target_folder" ]] && rm -rf "$target_folder"
+  mkdir -p "$target_folder"
+  touch "$test_logfile"
+}
+
+if [[ -z "$1" ]]; then
+  echo "Usage: $0 filename <test_folder>"
+  exit 1
+fi
+
+reset_output_dir
 process_test_folder
