@@ -88,11 +88,12 @@ function write_events_as_xml() {
 }
 
 function summarize_last_test() {
-  test_data=$(list_all_events | sed "/^$BEGIN/q")
-  test_name=$(sed -n "s/^$BEGIN|\(.*\)|.*/\1/p" <(echo "$test_data"))
-  failures=$(grep -c "^$FAILURE" <(echo "$test_data"))
-  errors=$(grep -c "^$ERROR" <(echo "$test_data"))
-  seconds=$(grep -E "(^$BEGIN|^$END)" <(echo "$test_data") | cut -d '|' -f 3 | sort -nr | paste -sd- - | bc)
+  local test_data=$(list_all_events | sed "/^$BEGIN/q")
+  local test_name=$(sed -n "s/^$BEGIN|\(.*\)|.*/\1/p" <(echo "$test_data"))
+  local failures=$(grep -c "^$FAILURE" <(echo "$test_data"))
+  local errors=$(grep -c "^$ERROR" <(echo "$test_data"))
+  local seconds=$(grep -E "(^$BEGIN|^$END)" <(echo "$test_data") | cut -d '|' -f 3 | sort -nr | paste -sd- - | bc)
+  local status
 
   if [[ "$errors" -gt 0 ]]; then
     status='e'
@@ -106,23 +107,23 @@ function summarize_last_test() {
 }
 
 function summarize_last_file() {
-  file_data=$(list_all_events | sed "/^$OPEN/q")
-  file_name=$(sed -n "s/^$OPEN|\(.*\)|.*/\1/p" <(echo "$file_data"))
-  tests=$(grep -c "^$TEST" <(echo "$file_data"))
-  failures=$(grep -c "^$FAILURE" <(echo "$file_data"))
-  errors=$(grep -c "^$ERROR" <(echo "$file_data"))
-  seconds=$(grep "^$TEST" <(echo "$file_data") | awk -F '|' '{sum+=$4} END {print sum}')
+  local file_data=$(list_all_events | sed "/^$OPEN/q")
+  local file_name=$(sed -n "s/^$OPEN|\(.*\)|.*/\1/p" <(echo "$file_data"))
+  local tests=$(grep -c "^$TEST" <(echo "$file_data"))
+  local failures=$(grep -c "^$FAILURE" <(echo "$file_data"))
+  local errors=$(grep -c "^$ERROR" <(echo "$file_data"))
+  local seconds=$(grep "^$TEST" <(echo "$file_data") | awk -F '|' '{sum+=$4} END {print sum}')
 
   handle_event "$FILE" "${file_name}|${tests:-0}|${failures:-0}|${errors:-0}|${seconds}"
 }
 
 function summarize_all_files() {
   # todo apply some more awk foo here
-  sum_data=$(grep "^$FILE" "$test_logfile")
-  tests=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$sum_data"))
-  failures=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$sum_data"))
-  errors=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$sum_data"))
-  seconds=$(awk -F '|' '{sum+=$6} END {print sum}' <(echo "$sum_data"))
+  local sum_data=$(grep "^$FILE" "$test_logfile")
+  local tests=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$sum_data"))
+  local failures=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$sum_data"))
+  local errors=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$sum_data"))
+  local seconds=$(awk -F '|' '{sum+=$6} END {print sum}' <(echo "$sum_data"))
 
   handle_event "$SUMMARY" "${tests}|${failures}|${errors}|${seconds}"
 }
@@ -134,7 +135,7 @@ function summarize_all_files() {
 function assert_equals() { # assert that $1 is equal to $2
   local called_by_line="${BASH_LINENO[0]}"
   if [[ ! "$1" == "$2" ]]; then
-    message=$(overflow_message "$FAILURE" "Expected ${1} but got ${2}")
+    local message=$(overflow_message "$FAILURE" "Expected ${1} but got ${2}")
     handle_event "$FAILURE" "$message|$called_by_line"
   fi
 }
@@ -142,7 +143,7 @@ function assert_equals() { # assert that $1 is equal to $2
 function assert_none_empty() { # assert that $1 is not empty or only spaces
   local called_by_line="${BASH_LINENO[0]}"
   if [[ -z "${1// }" ]]; then
-    message=$(overflow_message "$FAILURE" "Value was empty, when expecting nonEmpty")
+    local message=$(overflow_message "$FAILURE" "Value was empty, when expecting nonEmpty")
     handle_event "$FAILURE" "$message|$called_by_line"
   fi
 }
@@ -151,7 +152,7 @@ function assert_none_empty() { # assert that $1 is not empty or only spaces
 function assert_is_substring_of() { # assert that $1 is a substring of $2
   local called_by_line="${BASH_LINENO[0]}"
   if [[ ! "$2" =~ $1 ]]; then
-    message=$(overflow_message "$FAILURE" "${1} was not a substring of ${2}")
+    local message=$(overflow_message "$FAILURE" "${1} was not a substring of ${2}")
     handle_event "$FAILURE" "$message|$called_by_line"
  fi
 }
@@ -161,8 +162,8 @@ function assert_is_substring_of() { # assert that $1 is a substring of $2
 ######################
 
 function overflow_message() { # Only put one message in the error/assert
-  action=$1
-  full_message=$2
+  local action=$1
+  local full_message=$2
   handle_event "$MESSAGE" "#$action#"
   sed '1!G;h;$!d' <(echo "${full_message}") | while IFS= read -r line; do
     handle_event "$MESSAGE" "$line"
@@ -175,17 +176,16 @@ function overflow_message() { # Only put one message in the error/assert
 }
 
 function process_helper() {
-  # This sucks
-  test_name=$1
-
-  tmp_file="/tmp/bauta.$RANDOM.tmp"
+  # This sucks, but we can't use a subshell
+  local test_name=$1
+  local tmp_file="/tmp/bauta.$test_name.$RANDOM.tmp"
   "$test_name" &> "$tmp_file"
-  status=$?
-  output=$(cat $tmp_file)
+  local status=$?
+  local output=$(cat $tmp_file)
 
   if [[ "$status" -gt 0 ]]; then
     handle_event "$BEGIN" "$test_name"
-    message=$(overflow_message "$ERROR" "${output}")
+    local message=$(overflow_message "$ERROR" "${output}")
     handle_event "$ERROR" "${message}|${status}"
     handle_event "$END" "$test_name"
     summarize_last_test
@@ -194,14 +194,14 @@ function process_helper() {
 }
 
 function process_test() {
-    test_name=$1
+    local test_name=$1
     handle_event "$BEGIN" "$test_name"
 
-    output=$($test_name 2>&1)
-    status=$?
+    local output=$($test_name 2>&1)
+    local status=$?
 
     if [[ "$status" -gt 0 ]]; then
-      message=$(overflow_message "$ERROR" "${output}")
+      local message=$(overflow_message "$ERROR" "${output}")
       handle_event "$ERROR" "${message}|${status}"
     fi
 
