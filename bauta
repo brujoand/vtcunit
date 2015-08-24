@@ -1,5 +1,5 @@
 #! /usr/bin/env bash
-test_folder=$1
+test_folder=${1%/}
 target_folder="$(pwd)/test-reports"
 [[ -d "$target_folder" ]] && rm -rf "$target_folder"
 mkdir -p "$target_folder"
@@ -23,7 +23,7 @@ TEST='test'
 FILE='file'
 SUMMARY='summary'
 
-function log_event() {
+function handle_event() {
   local event_type=$1
   local event_data=$2
   local event="${event_type}|${event_data}|$(date +'%s')"
@@ -31,24 +31,24 @@ function log_event() {
 
   case $event_type in
     $OPEN)
-      present_to_user "${event}"
+      display_event "${event}"
       ;;
     $TEST)
-      present_to_user "${event}"
-      present_to_user "$(get_latest_problems)"
+      display_event "${event}"
+      display_event "$(list_current_problems)"
       ;;
     $FILE)
-      present_to_user "${event}"
-      present_to_user " " # Create some air
+      display_event "${event}"
+      display_event " " # Create some air
       ;;
     $SUMMARY)
-      present_to_user "${event}"
+      display_event "${event}"
       ;;
   esac
 
 }
 
-function present_to_user() {
+function display_event() {
   local green=$(echo -e '\e[32m')
   local red=$(echo -e '\e[31m')
   local reset=$(echo -e '\e[39m')
@@ -63,16 +63,16 @@ function present_to_user() {
     -e '/^$/d' >&3
 }
 
-function get_latest_events() {
+function list_all_events() {
   sed '1!G;h;$!d' "$test_logfile"
 }
 
-function get_latest_problems() { # I don't really like this :/
-  get_latest_events | sed "/^$BEGIN|/q" | grep -E "(^$ERROR|^$FAILURE)"
+function list_current_problems() {
+  list_all_events | sed "/^$BEGIN|/q" | grep -E "(^$ERROR|^$FAILURE)"
 }
 
-function generate_junit_xml() {
-{ get_latest_events | sed \
+function write_events_as_xml() {
+{ list_all_events | sed \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
     -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
     -e "s/^$FAILURE|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>/" \
@@ -87,9 +87,9 @@ function generate_junit_xml() {
     -e "/^$CLOSE/d" ; echo "</testsuites>"; }  | xmllint --format - > "$xml_output_file"
 }
 
-function summarize_test() {
-  test_name=$1
-  test_data=$(get_latest_events | sed "/^$BEGIN/q")
+function summarize_last_test() {
+  test_data=$(list_all_events | sed "/^$BEGIN/q")
+  test_name=$(sed -n "s/^$BEGIN|\(.*\)|.*/\1/p" <(echo "$test_data"))
   failures=$(grep -c "^$FAILURE" <(echo "$test_data"))
   errors=$(grep -c "^$ERROR" <(echo "$test_data"))
   seconds=$(grep -E "(^$BEGIN|^$END)" <(echo "$test_data") | cut -d '|' -f 3 | sort -nr | paste -sd- - | bc)
@@ -102,21 +102,21 @@ function summarize_test() {
     status='s'
   fi
 
-  log_event "$TEST" "${test_name}|${status}|${seconds}"
+  handle_event "$TEST" "${test_name}|${status}|${seconds}"
 }
 
-function summarize_file() {
-  file_data=$(get_latest_events | sed "/^$OPEN/q")
-  # todo apply some more awk foo here
+function summarize_last_file() {
+  file_data=$(list_all_events | sed "/^$OPEN/q")
+  file_name=$(sed -n "s/^$OPEN|\(.*\)|.*/\1/p" <(echo "$file_data"))
   tests=$(grep -c "^$TEST" <(echo "$file_data"))
   failures=$(grep -c "^$FAILURE" <(echo "$file_data"))
   errors=$(grep -c "^$ERROR" <(echo "$file_data"))
   seconds=$(grep "^$TEST" <(echo "$file_data") | awk -F '|' '{sum+=$4} END {print sum}')
 
-  log_event "$FILE" "${1}|${tests:-0}|${failures:-0}|${errors:-0}|${seconds}"
+  handle_event "$FILE" "${file_name}|${tests:-0}|${failures:-0}|${errors:-0}|${seconds}"
 }
 
-function summarize() {
+function summarize_all_files() {
   # todo apply some more awk foo here
   sum_data=$(grep "^$FILE" "$test_logfile")
   tests=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$sum_data"))
@@ -124,7 +124,7 @@ function summarize() {
   errors=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$sum_data"))
   seconds=$(awk -F '|' '{sum+=$6} END {print sum}' <(echo "$sum_data"))
 
-  log_event "$SUMMARY" "${tests}|${failures}|${errors}|${seconds}"
+  handle_event "$SUMMARY" "${tests}|${failures}|${errors}|${seconds}"
 }
 
 #################
@@ -133,17 +133,17 @@ function summarize() {
 
 function assert_equals() { # assert that $1 is equal to $2
   local called_by_line="${BASH_LINENO[0]}"
-  if [[ ! "$1" -eq "$2" ]]; then
+  if [[ ! "$1" == "$2" ]]; then
     message=$(overflow_message "$FAILURE" "Expected ${1} but got ${2}")
-    log_event "$FAILURE" "$message|$called_by_line"
+    handle_event "$FAILURE" "$message|$called_by_line"
   fi
 }
 
 function assert_none_empty() { # assert that $1 is not empty or only spaces
   local called_by_line="${BASH_LINENO[0]}"
-  if [[ -n "${1// }" ]]; then
+  if [[ -z "${1// }" ]]; then
     message=$(overflow_message "$FAILURE" "Value was empty, when expecting nonEmpty")
-    log_event "$FAILURE" "$message|$called_by_line"
+    handle_event "$FAILURE" "$message|$called_by_line"
   fi
 }
 
@@ -152,7 +152,7 @@ function assert_is_substring_of() { # assert that $1 is a substring of $2
   local called_by_line="${BASH_LINENO[0]}"
   if [[ ! "$2" =~ $1 ]]; then
     message=$(overflow_message "$FAILURE" "${1} was not a substring of ${2}")
-    log_event "$FAILURE" "$message|$called_by_line"
+    handle_event "$FAILURE" "$message|$called_by_line"
  fi
 }
 
@@ -163,9 +163,9 @@ function assert_is_substring_of() { # assert that $1 is a substring of $2
 function overflow_message() { # Only put one message in the error/assert
   action=$1
   full_message=$2
-  log_event "$MESSAGE" "#$action#"
+  handle_event "$MESSAGE" "#$action#"
   sed '1!G;h;$!d' <(echo "${full_message}") | while IFS= read -r line; do
-    log_event "$MESSAGE" "$line"
+    handle_event "$MESSAGE" "$line"
   done
   if [[ "$(echo "${full_message}" | wc -l)" -gt 1 ]]; then
     echo "$(echo "${full_message}" | head -n 1) (see output xml for full message)"
@@ -174,54 +174,72 @@ function overflow_message() { # Only put one message in the error/assert
   fi
 }
 
-function execute_function() {
+function process_helper() {
+  # This sucks
+  test_name=$1
+
+  tmp_file="/tmp/bauta.$RANDOM.tmp"
+  "$test_name" &> "$tmp_file"
+  status=$?
+  output=$(cat $tmp_file)
+
+  if [[ "$status" -gt 0 ]]; then
+    handle_event "$BEGIN" "$test_name"
+    message=$(overflow_message "$ERROR" "${output}")
+    handle_event "$ERROR" "${message}|${status}"
+    handle_event "$END" "$test_name"
+    summarize_last_test
+  fi
+  rm "$tmp_file"
+}
+
+function process_test() {
     test_name=$1
-    log_event "$BEGIN" "$test_name"
+    handle_event "$BEGIN" "$test_name"
+
     output=$($test_name 2>&1)
     status=$?
 
     if [[ "$status" -gt 0 ]]; then
       message=$(overflow_message "$ERROR" "${output}")
-      log_event "$ERROR" "${message}|${status}"
+      handle_event "$ERROR" "${message}|${status}"
     fi
 
-    log_event "$END" "$test_name"
-    summarize_test "$test_name"
+    handle_event "$END" "$test_name"
+    summarize_last_test
 }
 
-function check_file() {
+function process_file() {
   # todo sanitycheck the file
   local test_file=$1
   . "$test_file"
 
-  log_event "$OPEN" "$test_file"
+  handle_event "$OPEN" "$test_file"
 
   # Run setup function if defined
-  grep -q '^function setup()' "$test_file" && execute_function "setup"
+  grep -q '^function setup()' "$test_file" && process_helper "setup"
 
-  sed -n 's/^function \(check_.*\)().*/\1/p' "$test_file" | while IFS= read -r test_name; do
-    execute_function "$test_name"
+  sed -n 's/^function \(test_.*\)().*/\1/p' "$test_file" | while IFS= read -r test_name; do
+    process_test "$test_name"
   done
 
   # Run cleanup if defined
-  grep -q '^function cleanup()' "$test_file" && execute_function "cleanup"
+  grep -q '^function cleanup()' "$test_file" && process_helper "cleanup"
 
-  log_event "$CLOSE" "$test_file"
-  summarize_file "$test_file"
+  handle_event "$CLOSE" "$test_file"
+  summarize_last_file
 }
 
-function run_tests() {
-  # generate a summary
-  # create a rapport
+function process_test_folder() {
   while IFS= read -r -d '' file; do
-    (check_file "$file")
+    (process_file "$file")
   done < <(find "$test_folder" -type f \( -name '*.bash' -or -name '*.sh' \) -print0)
-  summarize
-  generate_junit_xml
+  summarize_all_files
+  write_events_as_xml
 }
 
 #######################
 #### Main handling ####
 #######################
 
-run_tests
+process_test_folder
