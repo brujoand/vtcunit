@@ -82,7 +82,7 @@ function write_events_as_xml() {
     -e "s/^$OPEN|.*/<\/testsuite>/" \
     -e "/^$TRACE/d" \
     -e "/^$END/d" \
-    -e "/^$CLOSE/d" ; echo "</testsuites>"; }  | xmllint --format - > "$xml_output_file"
+    -e "/^$CLOSE/d" ; echo "</testsuites>"; }  > "$xml_output_file"
 }
 
 function summarize_last_test() {
