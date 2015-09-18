@@ -1,0 +1,203 @@
+#! /usr/bin/env bash
+
+####################
+#### Statistics ####
+####################
+
+OPEN='open'
+CLOSE='close'
+BEGIN='begin'
+END='end'
+FAILURE='failure'
+ERROR='error'
+MESSAGE='message'
+TEST='test'
+FILE='file'
+SUMMARY='summary'
+TRACE='trace'
+
+function handle_event() {
+  local event_type=$1
+  local event_data=$2
+  local event="${event_type}|${event_data}|$(date +'%s')"
+  echo -e "${event}" >> "$test_logfile"
+
+  case $event_type in
+    $TRACE)
+      display_event "${event}"
+      ;;
+    $TEST)
+      display_event "${event}"
+      display_event "$(list_current_problems)"
+      ;;
+    $SUMMARY)
+      display_event "${event}"
+      ;;
+  esac
+
+}
+
+function display_event() {
+  local green=$(echo -e '\e[32m')
+  local red=$(echo -e '\e[31m')
+  local reset=$(echo -e '\e[39m')
+  echo "${1}" | sed \
+    -e "s/^$OPEN|\(.*\)|.*/  \1:/" \
+    -e "s/^$TEST|\(.*\)|s|.*/$green    +$reset \1/" \
+    -e "s/^$TEST|\(.*\)|.*|.*|.*/$red    -$reset \1/" \
+    -e "s/^$FAILURE|\(.*\)|\(.*\)|.*/$red      [Failure]$reset line \2: \1/" \
+    -e "s/^$ERROR|\(.*\)|.*|.*/$red      [Error]$reset \1/" \
+    -e "s/^$FILE|.*|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/  [Sum] tests: \1 failures: \2 errors: \3 time: \4s/" \
+    -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/[Total] tests: \1 failures: \2 errors: \3 time: \4s/" \
+    -e "s/^$TRACE|\(.*\)|\(.*\)|.*/      log[\1]: \2/" \
+    -e '/^$/d' >&3
+}
+
+function list_all_events() {
+  sed '1!G;h;$!d' "$test_logfile"
+}
+
+function list_current_problems() {
+  list_all_events | sed "/^$BEGIN|/q" | grep -E "(^$ERROR|^$FAILURE)"
+}
+
+function write_events_as_xml() {
+{ list_all_events | sed \
+    -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
+    -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
+    -e "s/^$FAILURE|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>/" \
+    -e "s/^$MESSAGE|#$FAILURE#|.*/<\/failure>/" \
+    -e "s/^$MESSAGE|#$ERROR#|.*/<\/error>/" \
+    -e "s/^$MESSAGE|\(.*\)|.*/\1/" \
+    -e "s/^$ERROR|\(.*\)|.*|.*/<error message='Error' type='error'>/" \
+    -e "s/^$TEST|\(.*\)|.*|\(.*\)|.*/<testcase name='\1' time='\2'>/" \
+    -e "s/^$BEGIN|.*/<\/testcase>/" \
+    -e "s/^$OPEN|.*/<\/testsuite>/" \
+    -e "/^$TRACE/d" \
+    -e "/^$END/d" \
+    -e "/^$CLOSE/d" ; echo "</testsuites>"; }  > "$xml_output_file"
+}
+
+function summarize_last_test() {
+  local test_data=$(list_all_events | sed "/^$BEGIN/q")
+  local test_name=$(sed -n "s/^$BEGIN|\(.*\)|.*/\1/p" <(echo "$test_data"))
+  local failures=$(grep -c "^$FAILURE" <(echo "$test_data"))
+  local errors=$(grep -c "^$ERROR" <(echo "$test_data"))
+  local seconds=$(grep -E "(^$BEGIN|^$END)" <(echo "$test_data") | cut -d '|' -f 3 | sort -nr | paste -sd- - | bc)
+  local status
+
+  if [[ "$errors" -gt 0 ]]; then
+    status='e'
+  elif [[ "$failures" -gt 0 ]]; then
+    status='f'
+  else
+    status='s'
+  fi
+
+  handle_event "$TEST" "${test_name}|${status}|${seconds}"
+}
+
+function summarize_last_file() {
+  local file_data=$(list_all_events | sed "/^$OPEN/q")
+  local file_name=$(sed -n "s/^$OPEN|\(.*\)|.*/\1/p" <(echo "$file_data"))
+  local tests=$(grep -c "^$TEST" <(echo "$file_data"))
+  local failures=$(grep -c "^$FAILURE" <(echo "$file_data"))
+  local errors=$(grep -c "^$ERROR" <(echo "$file_data"))
+  local seconds=$(grep "^$TEST" <(echo "$file_data") | awk -F '|' '{sum+=$4} END {print sum}')
+
+  handle_event "$FILE" "${file_name}|${tests:-0}|${failures:-0}|${errors:-0}|${seconds}"
+}
+
+function summarize_all_files() {
+  # todo apply some more awk foo here
+  local sum_data=$(grep "^$FILE" "$test_logfile")
+  local tests=$(awk -F '|' '{sum+=$3} END {print sum}' <(echo "$sum_data"))
+  local failures=$(awk -F '|' '{sum+=$4} END {print sum}' <(echo "$sum_data"))
+  local errors=$(awk -F '|' '{sum+=$5} END {print sum}' <(echo "$sum_data"))
+  local seconds=$(awk -F '|' '{sum+=$6} END {print sum}' <(echo "$sum_data"))
+
+  handle_event "$SUMMARY" "${tests}|${failures}|${errors}|${seconds}"
+  echo $(( errors + failures ))
+}
+
+######################
+#### Test Running ####
+######################
+
+function overflow_message() { # Only put one message in the error/assert
+  local action=$1
+  local full_message=$2
+  handle_event "$MESSAGE" "#$action#"
+  sed '1!G;h;$!d' <(echo "${full_message}") | while IFS= read -r line; do
+    handle_event "$MESSAGE" "$line"
+  done
+  if [[ "$(echo "${full_message}" | wc -l)" -gt 1 ]]; then
+    echo "$(echo "${full_message}" | head -n 1) (see output xml for full message)"
+  else
+    echo "$full_message"
+  fi
+}
+
+function process_file() {
+  local test_name=$1
+  handle_event "$BEGIN" "$test_name"
+
+  local output
+  output=$(varnishtest "$test_name" 2>&1)
+
+  if [[ $? -gt 0 ]]; then
+    local message=$(overflow_message "$ERROR" "${output}")
+    handle_event "$ERROR" "${message}|${status}"
+  fi
+
+  handle_event "$END" "$test_name"
+  summarize_last_test
+}
+
+function process_test_folder() {
+  handle_event "$OPEN" "$test_folder"
+
+  while IFS= read -r -d '' file; do
+    process_file "$file"
+  done < <(find "$test_folder" -type f \( -name '*.vtc' \) -print0)
+
+  handle_event "$CLOSE" "$test_folder"
+  summarize_last_file
+
+  local problems
+  problems=$(summarize_all_files)
+  write_events_as_xml
+  if [[ "$problems" == 0 ]]; then
+    exit 0
+  else
+    exit 1
+  fi
+}
+
+#######################
+#### Main handling ####
+#######################
+
+exec 3>&1 # make stdout avalable to subshells
+function reset_output_dir() {
+  test_logfile="$target_folder/test.log"
+  xml_output_file="$target_folder/test.xml"
+  [[ -d "$target_folder" ]] && rm -rf "$target_folder"
+  mkdir -p "$target_folder"
+  touch "$test_logfile"
+}
+
+function print_usage() {
+  echo "Usage: $0 <test_folder>"
+  exit 1
+}
+
+if [[ -n "$1" ]]; then
+  test_folder=${1%/}
+  target_folder="$test_folder/test-reports"
+  reset_output_dir
+  process_test_folder
+else
+  print_usage
+fi
+
