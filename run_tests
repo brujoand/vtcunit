@@ -1,0 +1,10 @@
+#! /usr/bin/env bash
+
+test_dir=/tests/
+
+if [[ -d "$test_dir" ]]; then
+  ./vtcunit "$test_dir"
+else
+  echo "Please mount your test folder to /tests => '-v /path/to/your/tests:/tests'"
+  exit 1
+fi
