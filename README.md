@@ -10,7 +10,7 @@ $ docker build .
 # lots of output
 Successfully built 59f1e8f42bf8
 
-$ docker run -it -v /Users/andbrujo/src/vtcunit/tests/:/tests 59f1e8f42bf8
+$ docker run -it -v /Users/brujoand/src/vtcunit/tests/:/tests 59f1e8f42bf8
     + /tests/a00000.vtc
     + /tests/a00001.vtc
     + /tests/a00002.vtc
