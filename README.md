@@ -44,3 +44,8 @@ Or if you would rather run without docker, on a host with varnish installed:
 Example vtc's are borrowed from https://github.com/varnish/Varnish-Cache.
 You should probably try to write something more specific..
 
+Also, there is an automated build at ducker hub so you could also do:
+
+```
+docker pull brujoand/vtcunit
+```
