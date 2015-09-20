@@ -1,0 +1,26 @@
+#! /usr/bin/env bash
+
+varnish_dir=/etc/varnish
+default_vcl="$varnish_dir"/default.vcl
+dd if=/dev/random of=/etc/varnish/secret count=1 status=none
+
+if [[ -d "$varnish_dir" ]]; then
+  ./vtcunit "$varnish_dir"
+  if [[ "$KEEP_RUNNING" == "true" ]]; then
+    if [[ -f "$default_vcl" ]]; then
+      /etc/init.d/varnish start || exit
+      echo -e "\nWaiting for varnish to start"
+      while ! bash -c "echo > /dev/tcp/localhost/6081" 2>/dev/null; do
+        printf '.'
+        sleep 1
+      done
+      echo -e "\nVarnish is ready, running varnishlog:\n"
+      varnishlog
+    else
+      echo "No default.vcl provided in the varnish folder, dropping to shell"
+      /bin/bash
+    fi
+  fi
+else
+  echo "Please mount your varnish folder to /etc/varnish/ => '-v /path/to/your/varnish:/etc/varnish'"
+fi

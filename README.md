@@ -3,6 +3,12 @@ This is a varnishtest runner which outputs xml in unit 4 format. For automation 
 Based on my previous work on Bauta.
 Seems to be working well, but could probably be slimmed down a bit.
 
+All you need is a varnish folder. Put some vtc in there.
+If you want to keep the container running after tests have completed add -e "KEEP_RUNNING=true"
+to the docker run command. If you would also like to run your custom vcl's when the tests are
+completed just add them to the varnish folder. Varnish will load 'default.vcl' and anything 
+that file includes.
+
 Build and run with docker:
 
 ```
@@ -10,14 +16,13 @@ $ docker build .
 # lots of output
 Successfully built 59f1e8f42bf8
 
-$ docker run -it -v /Users/brujoand/src/vtcunit/tests/:/tests 59f1e8f42bf8
+$ docker run -it -v /Users/brujoand/src/vtcunit/varnish/:/etc/varnish 59f1e8f42bf8
     + /tests/a00000.vtc
     + /tests/a00001.vtc
     + /tests/a00002.vtc
 [Total] tests: 3 failures: 0 errors: 0 time: 0s
 ```
-Note that I've mounted a folder as /tests, this is where vtcunit will search for vtc files to test.
-The tests folder is mounted with read & write and should contain a tests.log and tests.xml after the run.
+The varnish folder is mounted with read & write and should contain test-reports/tests.xml after the run.
 The xml file is what your buildsystem will want to parse. It should look something like this:
 
 ```

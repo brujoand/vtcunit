@@ -15,7 +15,9 @@ RUN curl https://repo.varnish-cache.org/GPG-key.txt | apt-key add -
 RUN echo "deb https://repo.varnish-cache.org/ubuntu/ trusty varnish-4.0" >> /etc/apt/sources.list.d/varnish-cache.list
 RUN apt-get update -yqq && apt-get install varnish -yqq
 
+RUN rm -rf /etc/varnish
+
 EXPOSE 6081
 ADD vtcunit /vtcunit
-ADD run_tests /run_tests
-CMD ["/run_tests"]
+ADD docker-entrypoint /docker-entrypoint
+CMD ["/docker-entrypoint"]
