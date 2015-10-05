@@ -3,7 +3,9 @@ MAINTAINER  Anders Brujordet "anders@brujordet.no"
 
 RUN apk --update add varnish bash coreutils bc
 
+RUN rm -rf /etc/varnish
+
 EXPOSE 6081
 ADD vtcunit /vtcunit
-ADD run_tests /run_tests
-CMD ["/run_tests"]
+ADD docker-entrypoint /docker-entrypoint
+CMD ["/docker-entrypoint"]
