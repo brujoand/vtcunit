@@ -63,6 +63,10 @@ function list_current_problems() {
 
 function write_events_as_xml() {
 { list_all_events | sed \
+    -e 's/\&/\&amp;/g' \
+    -e 's/%/\&#37;/g' \
+    -e 's/</\&lt;/g' \
+    -e 's/>/\&gt;/g' \
     -e "s/^$SUMMARY|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuites tests='\1' failures='\2' errors='\3' time='\4'>/" \
     -e "s/^$FILE|\(.*\)|\(.*\)|\(.*\)|\(.*\)|\(.*\)|.*/<testsuite name='\1' tests='\2' failures='\3' errors='\4' time='\5'>/" \
     -e "s/^$FAILURE|\(.*\)|.*|.*/<failure message='Assertion failed' type='failure'>/" \
@@ -75,7 +79,7 @@ function write_events_as_xml() {
     -e "s/^$OPEN|.*/<\/testsuite>/" \
     -e "/^$TRACE/d" \
     -e "/^$END/d" \
-    -e "/^$CLOSE/d" ; echo "</testsuites>"; }  > "$xml_output_file"
+    -e "/^$CLOSE/d" ; echo "</testsuites>"; } | grep -Ev "^\|[0-9]+" > "$xml_output_file"
 }
 
 function summarize_last_test() {
@@ -170,6 +174,7 @@ function process_test_folder() {
   if [[ "$problems" == 0 ]]; then
     exit 0
   else
+    touch "$target_folder"/.failed
     exit 1
   fi
 }
