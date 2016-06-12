@@ -183,7 +183,7 @@ function process_test_folder() {
 #### Main handling ####
 #######################
 
-exec 3>&1 # make stdout avalable to subshells
+exec 3>&1 # make stdout available to subshells
 function reset_output_dir() {
   test_logfile="$target_folder/test.log"
   xml_output_file="$target_folder/test.xml"
